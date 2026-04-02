@@ -31,12 +31,13 @@ const WARN_DURATION = 58; // warn if total > this
 async function probeAudioDuration(filePath) {
   const result = spawnSync(
     "ffprobe",
-    ["-v", "quiet", "-print_format", "json", "-show_streams", filePath],
+    ["-v", "quiet", "-print_format", "json", "-show_streams", "-show_format", filePath],
     { encoding: "utf8" }
   );
 
   if (result.status !== 0) {
-    throw new Error(`ffprobe failed for ${filePath}: ${result.stderr}`);
+    const detail = result.error?.message ?? result.stderr ?? "(no details)";
+    throw new Error(`ffprobe failed for ${filePath}: ${detail}`);
   }
 
   let data;
@@ -53,10 +54,14 @@ async function probeAudioDuration(filePath) {
     throw new Error(`No audio stream found in ${filePath}`);
   }
 
-  const duration = parseFloat(stream.duration);
+  let duration = parseFloat(stream.duration);
+  if (isNaN(duration) || duration <= 0) {
+    // fallback to format-level duration (present in VBR MP3s and some AAC files)
+    duration = parseFloat(data.format?.duration);
+  }
   if (isNaN(duration) || duration <= 0) {
     throw new Error(
-      `Invalid duration in audio stream for ${filePath}: ${stream.duration}`
+      `Cannot determine duration for ${filePath}: stream.duration=${stream.duration}, format.duration=${data.format?.duration}`
     );
   }
 
@@ -69,6 +74,12 @@ async function probeAudioDuration(filePath) {
  * @returns {Array<{name: string, duration: number}>}
  */
 function computeSlides({ sanskritDuration, hindiDuration }) {
+  if (!isFinite(sanskritDuration) || sanskritDuration <= 0) {
+    throw new Error(`computeSlides: invalid sanskritDuration: ${sanskritDuration}`);
+  }
+  if (!isFinite(hindiDuration) || hindiDuration <= 0) {
+    throw new Error(`computeSlides: invalid hindiDuration: ${hindiDuration}`);
+  }
   return [
     { name: "intro", duration: INTRO_DURATION },
     { name: "sanskrit", duration: sanskritDuration },
