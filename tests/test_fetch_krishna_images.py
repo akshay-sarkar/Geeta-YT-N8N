@@ -66,3 +66,5 @@ def test_fetch_images_mock(tmp_path, monkeypatch):
     assert len(files) == 2
     assert files[0].name == "001.jpg"
     assert files[1].name == "002.jpg"
+    assert files[0].read_bytes() == b"\xff\xd8\xff\xe0fake-jpeg-bytes"
+    assert files[1].read_bytes() == b"\xff\xd8\xff\xe0fake-jpeg-bytes"

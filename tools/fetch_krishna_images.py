@@ -28,7 +28,10 @@ def output_filename(index: int) -> str:
 
 
 def parse_photo_url(photo: dict) -> str:
-    """Extract the best available image URL from a Pexels photo object."""
+    """Extract the best available image URL from a Pexels photo object.
+
+    Returns empty string if no valid URL is found (caller should filter with `if url:`).
+    """
     src = photo.get("src", {})
     return src.get("large2x") or src.get("large") or src.get("original") or ""
 
@@ -91,10 +94,15 @@ def fetch_images(count: int, output_dir: pathlib.Path | None = None) -> int:
         except Exception as exc:
             print(f"  Warning: failed to download {url}: {exc}")
             continue
+        if not img_resp.content:
+            print(f"  Warning: empty response for {url}, skipping")
+            continue
         dest.write_bytes(img_resp.content)
         downloaded += 1
         time.sleep(0.2)  # polite rate limiting
 
+    if downloaded < count:
+        print(f"  Warning: requested {count} images but only {downloaded} were available.")
     return downloaded
 
 
