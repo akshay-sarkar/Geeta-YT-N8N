@@ -97,22 +97,28 @@ ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 ELEVENLABS_MODEL = "eleven_multilingual_v2"
 
 
-def call_elevenlabs(text: str, voice_id: str, output_path: pathlib.Path) -> None:
+def call_elevenlabs(
+    text: str,
+    voice_id: str,
+    output_path: pathlib.Path,
+    voice_settings: dict | None = None,
+) -> None:
     """Call ElevenLabs TTS API and write MP3 to output_path."""
     import requests
     api_key = os.environ.get("ELEVENLABS_API_KEY")
     if not api_key:
         raise EnvironmentError("ELEVENLABS_API_KEY is not set in environment or .env")
     url = ELEVENLABS_API_URL.format(voice_id=voice_id)
+    settings = voice_settings or {
+        "stability": 0.75,
+        "similarity_boost": 0.75,
+        "style": 0.30,
+        "use_speaker_boost": True,
+    }
     payload = {
         "text": text,
         "model_id": ELEVENLABS_MODEL,
-        "voice_settings": {
-            "stability": 0.75,
-            "similarity_boost": 0.75,
-            "style": 0.30,
-            "use_speaker_boost": True,
-        },
+        "voice_settings": settings,
     }
     resp = requests.post(
         url,
@@ -132,11 +138,13 @@ def generate_speech(
     voice_id: str,
     mock_audio: bool = False,
     force: bool = False,
+    voice_settings: dict | None = None,
 ) -> pathlib.Path:
     """Generate MP3 for the given text. Cache-first.
 
     kind: one of "sanskrit", "hindi_v1", "hindi_v2"
     mock_audio: use macOS `say` command instead of ElevenLabs (free, for dev/testing)
+    voice_settings: optional ElevenLabs voice_settings dict; uses per-voice defaults if None
     """
     out = audio_path(chapter, verse, kind).resolve()
     out.parent.mkdir(exist_ok=True)
@@ -152,6 +160,6 @@ def generate_speech(
         if result.returncode != 0:
             raise RuntimeError(f"macOS say failed: {result.stderr.decode()}")
     else:
-        call_elevenlabs(text, voice_id, out)
+        call_elevenlabs(text, voice_id, out, voice_settings)
 
     return out
