@@ -1,6 +1,6 @@
 """generate_audio.py — ElevenLabs + Claude audio generation with permanent cache."""
 from __future__ import annotations
-import os, pathlib, re, textwrap
+import os, pathlib, re, subprocess, textwrap
 import anthropic
 from dotenv import load_dotenv
 
@@ -91,3 +91,67 @@ def generate_summaries(
     p2.write_text(s2, encoding="utf-8")
 
     return s1, s2
+
+
+ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+ELEVENLABS_MODEL = "eleven_multilingual_v2"
+
+
+def call_elevenlabs(text: str, voice_id: str, output_path: pathlib.Path) -> None:
+    """Call ElevenLabs TTS API and write MP3 to output_path."""
+    import requests
+    api_key = os.environ.get("ELEVENLABS_API_KEY")
+    if not api_key:
+        raise EnvironmentError("ELEVENLABS_API_KEY is not set in environment or .env")
+    url = ELEVENLABS_API_URL.format(voice_id=voice_id)
+    payload = {
+        "text": text,
+        "model_id": ELEVENLABS_MODEL,
+        "voice_settings": {
+            "stability": 0.75,
+            "similarity_boost": 0.75,
+            "style": 0.30,
+            "use_speaker_boost": True,
+        },
+    }
+    resp = requests.post(
+        url,
+        json=payload,
+        headers={"xi-api-key": api_key, "Content-Type": "application/json"},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    output_path.write_bytes(resp.content)
+
+
+def generate_speech(
+    chapter: int,
+    verse: int,
+    kind: str,
+    text: str,
+    voice_id: str,
+    mock_audio: bool = False,
+    force: bool = False,
+) -> pathlib.Path:
+    """Generate MP3 for the given text. Cache-first.
+
+    kind: one of "sanskrit", "hindi_v1", "hindi_v2"
+    mock_audio: use macOS `say` command instead of ElevenLabs (free, for dev/testing)
+    """
+    out = audio_path(chapter, verse, kind).resolve()
+    out.parent.mkdir(exist_ok=True)
+
+    if not force and out.exists():
+        return out
+
+    if mock_audio:
+        result = subprocess.run(
+            ["say", "-o", str(out), "--data-format=LEF32@22050", text],
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"macOS say failed: {result.stderr.decode()}")
+    else:
+        call_elevenlabs(text, voice_id, out)
+
+    return out

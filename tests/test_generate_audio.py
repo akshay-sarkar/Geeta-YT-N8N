@@ -35,3 +35,35 @@ def test_summary_cache_hit_skips_claude(tmp_path, monkeypatch):
     assert s1 == "पहली सारांश"
     assert s2 == "दूसरी सारांश"
     assert called == [], "Claude must not be called when cache files exist"
+
+
+def test_generate_speech_cache_hit_skips_elevenlabs(tmp_path, monkeypatch):
+    from generate_audio import generate_speech
+    monkeypatch.chdir(tmp_path)
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    (audio_dir / "ch02_v047_sanskrit.mp3").write_bytes(b"fake-mp3-data")
+
+    called = []
+    def fake_elevenlabs(*a, **kw):
+        called.append(1)
+    monkeypatch.setattr("generate_audio.call_elevenlabs", fake_elevenlabs)
+
+    result = generate_speech(2, 47, "sanskrit", "text", "voice-id", mock_audio=False)
+    assert result == audio_dir / "ch02_v047_sanskrit.mp3"
+    assert called == [], "ElevenLabs must not be called when cache file exists"
+
+def test_generate_speech_mock_uses_say(tmp_path, monkeypatch):
+    from generate_audio import generate_speech
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "audio").mkdir()
+
+    say_calls = []
+    def fake_spawn(cmd, *a, **kw):
+        say_calls.append(cmd)
+        return type("R", (), {"returncode": 0})()
+    monkeypatch.setattr("generate_audio.subprocess.run", fake_spawn)
+
+    result = generate_speech(2, 47, "sanskrit", "Sanskrit text", "voice-id", mock_audio=True)
+    assert result == tmp_path / "audio" / "ch02_v047_sanskrit.mp3"
+    assert any("say" in str(c) for c in say_calls), "mock mode must call macOS say"
