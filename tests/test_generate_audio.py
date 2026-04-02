@@ -61,9 +61,13 @@ def test_generate_speech_mock_uses_say(tmp_path, monkeypatch):
     say_calls = []
     def fake_spawn(cmd, *a, **kw):
         say_calls.append(cmd)
+        # When afconvert is called, write the expected output file so the
+        # out.exists() guard passes.
+        if cmd[0] == "afconvert":
+            pathlib.Path(cmd[-1]).write_bytes(b"fake-mp3-data")
         return type("R", (), {"returncode": 0})()
     monkeypatch.setattr("generate_audio.subprocess.run", fake_spawn)
 
     result = generate_speech(2, 47, "sanskrit", "Sanskrit text", "voice-id", mock_audio=True)
     assert result == tmp_path / "audio" / "ch02_v047_sanskrit.mp3"
-    assert any("say" in str(c) for c in say_calls), "mock mode must call macOS say"
+    assert say_calls and say_calls[0][0] == "say", "mock mode must call macOS say as first arg"

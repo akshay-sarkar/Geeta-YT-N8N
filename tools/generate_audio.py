@@ -2,6 +2,7 @@
 from __future__ import annotations
 import os, pathlib, re, subprocess, textwrap
 import anthropic
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -104,7 +105,6 @@ def call_elevenlabs(
     voice_settings: dict | None = None,
 ) -> None:
     """Call ElevenLabs TTS API and write MP3 to output_path."""
-    import requests
     api_key = os.environ.get("ELEVENLABS_API_KEY")
     if not api_key:
         raise EnvironmentError("ELEVENLABS_API_KEY is not set in environment or .env")
@@ -126,7 +126,12 @@ def call_elevenlabs(
         headers={"xi-api-key": api_key, "Content-Type": "application/json"},
         timeout=60,
     )
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except Exception as exc:
+        raise RuntimeError(
+            f"ElevenLabs API error {resp.status_code}: {resp.text[:500]}"
+        ) from exc
     output_path.write_bytes(resp.content)
 
 
@@ -147,18 +152,27 @@ def generate_speech(
     voice_settings: optional ElevenLabs voice_settings dict; uses per-voice defaults if None
     """
     out = audio_path(chapter, verse, kind).resolve()
-    out.parent.mkdir(exist_ok=True)
-
     if not force and out.exists():
         return out
+    out.parent.mkdir(exist_ok=True)
 
     if mock_audio:
+        tmp_aiff = out.with_suffix(".aiff")
         result = subprocess.run(
-            ["say", "-o", str(out), "--data-format=LEF32@22050", text],
+            ["say", "-o", str(tmp_aiff), text],
             capture_output=True,
         )
         if result.returncode != 0:
             raise RuntimeError(f"macOS say failed: {result.stderr.decode()}")
+        convert = subprocess.run(
+            ["afconvert", "-f", "mp4f", "-d", "aac", str(tmp_aiff), str(out)],
+            capture_output=True,
+        )
+        if convert.returncode != 0:
+            raise RuntimeError(f"afconvert failed: {convert.stderr.decode()}")
+        tmp_aiff.unlink(missing_ok=True)
+        if not out.exists():
+            raise RuntimeError(f"mock audio generation succeeded but output not found: {out}")
     else:
         call_elevenlabs(text, voice_id, out, voice_settings)
 
