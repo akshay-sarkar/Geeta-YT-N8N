@@ -1,0 +1,88 @@
+"""generate_audio.py — ElevenLabs + Claude audio generation with permanent cache."""
+from __future__ import annotations
+import os, pathlib, textwrap
+import anthropic
+from dotenv import load_dotenv
+
+load_dotenv()
+
+AUDIO_DIR = pathlib.Path("audio")
+
+
+def audio_path(chapter: int, verse: int, kind: str, ext: str = "mp3") -> pathlib.Path:
+    """Return canonical cache path for an audio/text asset."""
+    return AUDIO_DIR / f"ch{chapter:02d}_v{verse:03d}_{kind}.{ext}"
+
+
+def parse_summaries(raw: str) -> tuple[str, str]:
+    """Extract the two Hindi summaries from Claude's response.
+
+    Expected format (flexible):
+        Summary 1: <text>
+        Summary 2: <text>
+    Falls back to splitting on blank lines if markers are absent.
+    """
+    import re
+    m1 = re.search(r"Summary\s*1\s*[:\-]\s*(.+?)(?=Summary\s*2|$)", raw, re.S | re.I)
+    m2 = re.search(r"Summary\s*2\s*[:\-]\s*(.+?)$", raw, re.S | re.I)
+    if m1 and m2:
+        return m1.group(1).strip(), m2.group(1).strip()
+    # Fallback: split on blank line
+    parts = [p.strip() for p in raw.strip().split("\n\n") if p.strip()]
+    if len(parts) >= 2:
+        return parts[0], parts[1]
+    return raw.strip(), raw.strip()
+
+
+def call_claude(prompt: str) -> str:
+    """Call Claude API and return the text response."""
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=512,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return message.content[0].text
+
+
+def generate_summaries(
+    chapter: int,
+    verse: int,
+    sanskrit_text: str,
+    word_meanings: str,
+    force: bool = False,
+) -> tuple[str, str]:
+    """Return (summary_v1, summary_v2). Cache-first — skips Claude if files exist."""
+    p1 = audio_path(chapter, verse, "summary_v1", ext="txt")
+    p2 = audio_path(chapter, verse, "summary_v2", ext="txt")
+
+    if not force and p1.exists() and p2.exists():
+        return p1.read_text(encoding="utf-8"), p2.read_text(encoding="utf-8")
+
+    prompt = textwrap.dedent(f"""
+        You are writing spoken Hindi summaries for a YouTube Shorts video about the Bhagavad Gita.
+
+        Shloka (Chapter {chapter}, Verse {verse}):
+        Sanskrit: {sanskrit_text}
+        Word meanings: {word_meanings}
+
+        Write TWO distinct Hindi summaries of this shloka. Each should be:
+        - 2-3 natural spoken sentences (suitable for a voice-over)
+        - Written in simple, modern Hindi (Devanagari script)
+        - Capturing the spiritual essence, not a literal translation
+        - Different in wording and emphasis from each other
+        - Under 40 words each (keep it short for YouTube Shorts)
+
+        Format your response exactly like this:
+        Summary 1: <first summary in Hindi>
+        Summary 2: <second summary in Hindi>
+    """).strip()
+
+    raw = call_claude(prompt)
+    s1, s2 = parse_summaries(raw)
+
+    AUDIO_DIR.mkdir(exist_ok=True)
+    p1.write_text(s1, encoding="utf-8")
+    p2.write_text(s2, encoding="utf-8")
+
+    return s1, s2

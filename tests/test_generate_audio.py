@@ -1,0 +1,37 @@
+import sys, os, json, pathlib, types
+sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "tools"))
+
+def test_audio_path_format():
+    from generate_audio import audio_path
+    p = audio_path(2, 47, "sanskrit")
+    assert p == pathlib.Path("audio/ch02_v047_sanskrit.mp3")
+
+def test_audio_path_txt():
+    from generate_audio import audio_path
+    p = audio_path(2, 47, "summary_v1", ext="txt")
+    assert p == pathlib.Path("audio/ch02_v047_summary_v1.txt")
+
+def test_parse_two_summaries():
+    from generate_audio import parse_summaries
+    raw = "Summary 1: अर्जुन को कर्म करना चाहिए।\nSummary 2: कर्म ही पूजा है।"
+    s1, s2 = parse_summaries(raw)
+    assert "अर्जुन" in s1
+    assert "कर्म" in s2
+
+def test_summary_cache_hit_skips_claude(tmp_path, monkeypatch):
+    from generate_audio import generate_summaries
+    monkeypatch.chdir(tmp_path)
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    (audio_dir / "ch02_v047_summary_v1.txt").write_text("पहली सारांश", encoding="utf-8")
+    (audio_dir / "ch02_v047_summary_v2.txt").write_text("दूसरी सारांश", encoding="utf-8")
+
+    called = []
+    def fake_claude(*a, **kw):
+        called.append(1)
+    monkeypatch.setattr("generate_audio.call_claude", fake_claude)
+
+    s1, s2 = generate_summaries(2, 47, "Sanskrit text", "word meanings")
+    assert s1 == "पहली सारांश"
+    assert s2 == "दूसरी सारांश"
+    assert called == [], "Claude must not be called when cache files exist"
