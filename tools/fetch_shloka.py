@@ -17,13 +17,15 @@ def fetch_shloka(chapter: int, verse: int, dataset_path: str = "data/gita.json")
     for entry in entries:
         ch = entry.get("chapter_number") or entry.get("chapter")
         vs = entry.get("verse_number")   or entry.get("verse")
+        if ch is None or vs is None:
+            continue
         if int(ch) == chapter and int(vs) == verse:
             return {
                 "chapter_number": int(ch),
                 "verse_number":   int(vs),
                 "text":           entry.get("text") or entry.get("sanskrit") or "",
                 "transliteration": entry.get("transliteration") or "",
-                "translation":    entry.get("translation") or entry.get("meaning") or "",
+                "translation":    entry.get("translation") or entry.get("meaning") or entry.get("word_meanings") or "",
             }
 
     raise ValueError(f"Shloka Ch{chapter} V{verse} not found in dataset")

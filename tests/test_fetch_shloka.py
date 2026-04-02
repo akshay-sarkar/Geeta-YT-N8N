@@ -21,6 +21,7 @@ def test_fetch_known_shloka(tmp_path):
     assert result["text"] == "कर्मण्येवाधिकारस्ते"
     assert result["transliteration"] == "karmanye vadhikaras te"
     assert "translation" in result
+    assert result["translation"] == "You have a right"
 
 def test_fetch_missing_shloka(tmp_path):
     dataset = tmp_path / "gita.json"
