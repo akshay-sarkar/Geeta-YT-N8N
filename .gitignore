@@ -1,0 +1,7 @@
+.env
+.tmp/
+audio/
+__pycache__/
+*.pyc
+node_modules/
+.superpowers/
