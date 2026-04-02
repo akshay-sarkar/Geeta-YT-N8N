@@ -1,6 +1,6 @@
 """generate_audio.py — ElevenLabs + Claude audio generation with permanent cache."""
 from __future__ import annotations
-import os, pathlib, textwrap
+import os, pathlib, re, textwrap
 import anthropic
 from dotenv import load_dotenv
 
@@ -22,7 +22,6 @@ def parse_summaries(raw: str) -> tuple[str, str]:
         Summary 2: <text>
     Falls back to splitting on blank lines if markers are absent.
     """
-    import re
     m1 = re.search(r"Summary\s*1\s*[:\-]\s*(.+?)(?=Summary\s*2|$)", raw, re.S | re.I)
     m2 = re.search(r"Summary\s*2\s*[:\-]\s*(.+?)$", raw, re.S | re.I)
     if m1 and m2:
@@ -31,12 +30,15 @@ def parse_summaries(raw: str) -> tuple[str, str]:
     parts = [p.strip() for p in raw.strip().split("\n\n") if p.strip()]
     if len(parts) >= 2:
         return parts[0], parts[1]
-    return raw.strip(), raw.strip()
+    raise ValueError(f"parse_summaries: expected 2 summaries, got 1. Raw: {raw[:200]!r}")
 
 
 def call_claude(prompt: str) -> str:
     """Call Claude API and return the text response."""
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise EnvironmentError("ANTHROPIC_API_KEY is not set in environment or .env")
+    client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=512,
@@ -57,7 +59,10 @@ def generate_summaries(
     p2 = audio_path(chapter, verse, "summary_v2", ext="txt")
 
     if not force and p1.exists() and p2.exists():
-        return p1.read_text(encoding="utf-8"), p2.read_text(encoding="utf-8")
+        s1 = p1.read_text(encoding="utf-8")
+        s2 = p2.read_text(encoding="utf-8")
+        if s1.strip() and s2.strip():
+            return s1, s2
 
     prompt = textwrap.dedent(f"""
         You are writing spoken Hindi summaries for a YouTube Shorts video about the Bhagavad Gita.
