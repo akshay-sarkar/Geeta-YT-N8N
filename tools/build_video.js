@@ -15,6 +15,8 @@
  */
 
 const { spawnSync } = require("child_process");
+const path = require("path");
+const fs = require("fs");
 
 // Slide timing constants (seconds)
 const INTRO_DURATION = 1.0;
@@ -89,4 +91,268 @@ function computeSlides({ sanskritDuration, hindiDuration }) {
   ];
 }
 
-module.exports = { probeAudioDuration, computeSlides, WARN_DURATION };
+/**
+ * Find the ffmpeg/ffprobe binaries that support drawtext (libfreetype).
+ * Prefers ffmpeg-full (keg-only Homebrew) over the default ffmpeg.
+ * Returns { ffmpeg, ffprobe } absolute paths.
+ */
+function findFfmpegBinaries() {
+  const candidates = [
+    "/opt/homebrew/opt/ffmpeg-full/bin",
+    "/usr/local/opt/ffmpeg-full/bin",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+  ];
+  for (const dir of candidates) {
+    const ffmpeg = path.join(dir, "ffmpeg");
+    const ffprobe = path.join(dir, "ffprobe");
+    if (fs.existsSync(ffmpeg) && fs.existsSync(ffprobe)) {
+      // Check if this ffmpeg has drawtext
+      const r = spawnSync(ffmpeg, ["-filters"], { encoding: "utf8" });
+      if ((r.stdout || "").includes("drawtext")) {
+        return { ffmpeg, ffprobe };
+      }
+    }
+  }
+  throw new Error(
+    "No ffmpeg with drawtext filter found.\n" +
+    "Install with: brew install ffmpeg-full\n" +
+    "Then ensure /opt/homebrew/opt/ffmpeg-full/bin/ffmpeg is accessible."
+  );
+}
+
+// Cache binaries so we only resolve once per process
+let _bins = null;
+function getBins() {
+  if (!_bins) _bins = findFfmpegBinaries();
+  return _bins;
+}
+
+/**
+ * Synchronously probe audio duration. Used internally by buildVideo.
+ * (probeAudioDuration is the async public API; this is the sync internal version)
+ */
+function getAudioDuration(filePath) {
+  const { ffprobe } = getBins();
+  const result = spawnSync(ffprobe, [
+    "-v", "quiet",
+    "-print_format", "json",
+    "-show_streams",
+    "-show_format",
+    filePath,
+  ], { encoding: "utf8" });
+
+  if (result.status !== 0) {
+    const detail = result.error?.message ?? result.stderr ?? "(no details)";
+    throw new Error(`ffprobe failed for ${filePath}: ${detail}`);
+  }
+
+  const data = JSON.parse(result.stdout);
+  const stream = (data.streams || []).find(s => s.codec_type === "audio");
+  if (!stream) throw new Error(`No audio stream found in ${filePath}`);
+
+  let dur = parseFloat(stream.duration);
+  if (isNaN(dur) || dur <= 0) dur = parseFloat(data.format?.duration);
+  if (isNaN(dur) || dur <= 0) throw new Error(`Cannot determine duration for ${filePath}`);
+  return dur;
+}
+
+/**
+ * Compute absolute start/end timestamps for each slide.
+ * Returns { slide2Start, slide2End, slide3Start, slide3End,
+ *           slide4Start, slide4End, totalDur, warning }
+ */
+function computeTimings({ sanskritDur, hindiDur }) {
+  const slide2Start = INTRO_DURATION;
+  const slide2End   = slide2Start + sanskritDur;
+  const slide3Start = slide2End;
+  const slide3End   = slide3Start + TRANSLIT_DURATION;
+  const slide4Start = slide3End;
+  const slide4End   = slide4Start + hindiDur;
+  const totalDur    = slide4End + OUTRO_DURATION;
+  return {
+    slide2Start, slide2End,
+    slide3Start, slide3End,
+    slide4Start, slide4End,
+    totalDur,
+    warning: totalDur > WARN_DURATION,
+  };
+}
+
+/**
+ * Find the Noto Sans Devanagari font on macOS.
+ * Returns the absolute path to the .ttf/.otf file.
+ */
+function findFont() {
+  const candidates = [
+    "/Library/Fonts/NotoSansDevanagari-Regular.ttf",
+    "/Library/Fonts/NotoSansDevanagari[wdth,wght].ttf",
+    "/opt/homebrew/share/fonts/noto/NotoSansDevanagari-Regular.ttf",
+    "/usr/local/share/fonts/noto/NotoSansDevanagari-Regular.ttf",
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  // fallback: use locate/find
+  const r = spawnSync("find", ["/Library/Fonts", "/opt/homebrew", "-name", "*Devanagari*.ttf", "-maxdepth", "6"], { encoding: "utf8" });
+  const found = (r.stdout || "").split("\n").filter(Boolean);
+  if (found.length) return found[0];
+  throw new Error("Noto Sans Devanagari font not found. Install with: brew install --cask font-noto-sans-devanagari");
+}
+
+/** Word-wraps text at maxChars per line. */
+function wrapText(text, maxChars = 16) {
+  const words = text.split(/\s+/);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    const joined = cur ? cur + " " + w : w;
+    if (joined.length > maxChars && cur) { lines.push(cur); cur = w; }
+    else cur = joined;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+/** Escapes special characters for FFmpeg drawtext filter. */
+function esc(t) {
+  return t
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\u2019")
+    .replace(/:/g, "\\:")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/%/g, "\\%");
+}
+
+/** Returns one drawtext filter string. */
+function dt({ text, font, size, color, x, y, enable }) {
+  return `drawtext=fontfile='${font}':text='${esc(text)}':fontcolor=${color}` +
+         `:fontsize=${size}:x=${x}:y=${y}:enable='${enable}'`;
+}
+
+/**
+ * Build one MP4 via FFmpeg.
+ *
+ * @param {{
+ *   chapter: number, verse: number,
+ *   sanskritText: string, transliteration: string, hindiSummary: string,
+ *   sanskritAudio: string, hindiAudio: string, fluteAudio: string,
+ *   style: "plain"|"image",
+ *   krishnaPoolDir?: string,
+ *   outputPath: string
+ * }} opts
+ */
+function buildVideo({ chapter, verse, sanskritText, transliteration, hindiSummary,
+                      sanskritAudio, hindiAudio, fluteAudio, style,
+                      krishnaPoolDir = "images/krishna-pool", outputPath }) {
+
+  const font        = findFont();
+  const sanskritDur = getAudioDuration(sanskritAudio);
+  const hindiDur    = getAudioDuration(hindiAudio);
+  const t           = computeTimings({ sanskritDur, hindiDur });
+
+  if (t.warning) {
+    console.warn(`⚠  WARNING: ${outputPath} is ${t.totalDur.toFixed(1)}s > 58s — shorten Hindi summary`);
+  }
+
+  // ── Text overlay filters ──────────────────────────────────────────────
+  const LINE_H = 54;
+  const filters = [];
+
+  // Top label — always visible
+  filters.push(dt({ text: `Chapter ${chapter} | Shloka ${verse}`,
+                    font, size: 26, color: "white@0.60",
+                    x: "(w-text_w)/2", y: "90", enable: "gte(t,0)" }));
+
+  // Slide 2 — Sanskrit (yellow, multi-line)
+  const sLines = wrapText(sanskritText, 16);
+  sLines.forEach((line, i) =>
+    filters.push(dt({ text: line, font, size: 42, color: "#FFD700",
+                      x: "(w-text_w)/2",
+                      y: `(h-${sLines.length * LINE_H})/2-20+${i * LINE_H}`,
+                      enable: `between(t,${t.slide2Start},${t.slide2End})` }))
+  );
+
+  // Slide 3 — Transliteration (white, centered)
+  filters.push(dt({ text: transliteration, font, size: 26, color: "white@0.80",
+                    x: "(w-text_w)/2", y: "(h-text_h)/2",
+                    enable: `between(t,${t.slide3Start},${t.slide3End})` }));
+
+  // Slide 4 — Hindi meaning (white, multi-line)
+  const hLines = wrapText(hindiSummary, 16);
+  hLines.forEach((line, i) =>
+    filters.push(dt({ text: line, font, size: 38, color: "white",
+                      x: "(w-text_w)/2",
+                      y: `(h-${hLines.length * LINE_H})/2-20+${i * LINE_H}`,
+                      enable: `between(t,${t.slide4Start},${t.slide4End})` }))
+  );
+
+  // Watermark — always visible
+  filters.push(dt({ text: "@GitaShlokas", font, size: 22, color: "white@0.35",
+                    x: "(w-text_w)/2", y: "h-70", enable: "gte(t,0)" }));
+
+  const textFilters = filters.join(",");
+
+  // ── Background ────────────────────────────────────────────────────────
+  let bgInputArgs, bgFilter;
+  if (style === "plain") {
+    bgInputArgs = ["-f", "lavfi", "-i",
+                   `color=c=0x1c0a00:s=1080x1920:r=30:d=${t.totalDur}`];
+    bgFilter = `[0:v]${textFilters}[vout]`;
+  } else {
+    const imgs = fs.readdirSync(krishnaPoolDir).filter(f => /\.jpg$/i.test(f));
+    if (!imgs.length) throw new Error(`No images in ${krishnaPoolDir}. Run fetch_krishna_images.py first.`);
+    const img = path.join(krishnaPoolDir, imgs[Math.floor(Math.random() * imgs.length)]);
+    console.log(`  Image: ${img}`);
+    bgInputArgs = ["-loop", "1", "-framerate", "30", "-t", String(t.totalDur), "-i", img];
+    bgFilter = `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,` +
+               `crop=1080:1920,fps=30,` +
+               `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.60:t=fill,` +
+               `${textFilters}[vout]`;
+  }
+
+  // ── Audio ─────────────────────────────────────────────────────────────
+  const s2ms = Math.round(t.slide2Start * 1000);
+  const s4ms = Math.round(t.slide4Start * 1000);
+  // Note: FFmpeg's filter_complex expression evaluator does not support or().
+  // Use gt(a+b,0) to combine two conditions. All commas must be escaped as \,
+  // within filter_complex strings (single quotes protect against filter-graph
+  // parsing but not expression-level comma splitting in filter options).
+  const fluteExpr =
+    `if(gt(between(t\\,${t.slide2Start}\\,${t.slide2End})` +
+    `+between(t\\,${t.slide4Start}\\,${t.slide4End})\\,0)\\,0.1\\,0.2)`;
+
+  const filterComplex = [
+    bgFilter,
+    `[1:a]adelay=${s2ms}|${s2ms},apad=whole_dur=${t.totalDur}[skt]`,
+    `[2:a]adelay=${s4ms}|${s4ms},apad=whole_dur=${t.totalDur}[hnd]`,
+    `[3:a]aloop=loop=-1:size=2000000000,atrim=0:${t.totalDur},` +
+        `volume='${fluteExpr}':eval=frame[flute]`,
+    `[skt][hnd][flute]amix=inputs=3:normalize=0:dropout_transition=0[aout]`,
+  ].join(";");
+
+  const args = [
+    "-y",
+    ...bgInputArgs,
+    "-i", sanskritAudio,
+    "-i", hindiAudio,
+    "-stream_loop", "-1", "-i", fluteAudio,
+    "-filter_complex", filterComplex,
+    "-map", "[vout]", "-map", "[aout]",
+    "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+    "-c:a", "aac", "-ar", "44100",
+    "-t", String(t.totalDur),
+    outputPath,
+  ];
+
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  const { ffmpeg } = getBins();
+  const r = spawnSync(ffmpeg, args, { encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
+  if (r.status !== 0) {
+    const detail = r.error?.message ?? r.stderr?.slice(-1200) ?? "(no details)";
+    throw new Error(`FFmpeg failed:\n${detail}`);
+  }
+}
+
+module.exports = { probeAudioDuration, computeSlides, WARN_DURATION, getAudioDuration, computeTimings, findFont, buildVideo };
