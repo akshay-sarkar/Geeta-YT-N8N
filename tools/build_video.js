@@ -193,6 +193,7 @@ function findFont() {
   const candidates = [
     "/Library/Fonts/NotoSansDevanagari-Regular.ttf",
     "/Library/Fonts/NotoSansDevanagari[wdth,wght].ttf",
+    "/opt/homebrew/Caskroom/font-noto-sans-devanagari/latest/NotoSansDevanagari[wdth,wght].ttf",
     "/opt/homebrew/share/fonts/noto/NotoSansDevanagari-Regular.ttf",
     "/usr/local/share/fonts/noto/NotoSansDevanagari-Regular.ttf",
   ];
