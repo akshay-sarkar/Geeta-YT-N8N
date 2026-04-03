@@ -31,8 +31,9 @@ const WARN_DURATION = 58; // warn if total > this
  * @returns {Promise<number>}
  */
 async function probeAudioDuration(filePath) {
+  const { ffprobe } = getBins();
   const result = spawnSync(
-    "ffprobe",
+    ffprobe,
     ["-v", "quiet", "-print_format", "json", "-show_streams", "-show_format", filePath],
     { encoding: "utf8" }
   );
@@ -147,7 +148,12 @@ function getAudioDuration(filePath) {
     throw new Error(`ffprobe failed for ${filePath}: ${detail}`);
   }
 
-  const data = JSON.parse(result.stdout);
+  let data;
+  try {
+    data = JSON.parse(result.stdout);
+  } catch (e) {
+    throw new Error(`ffprobe returned invalid JSON for ${filePath}: ${result.stdout.slice(0, 200)}`);
+  }
   const stream = (data.streams || []).find(s => s.codec_type === "audio");
   if (!stream) throw new Error(`No audio stream found in ${filePath}`);
 
@@ -266,6 +272,7 @@ function buildVideo({ chapter, verse, sanskritText, transliteration, hindiSummar
                     x: "(w-text_w)/2", y: "90", enable: "gte(t,0)" }));
 
   // Slide 2 — Sanskrit (yellow, multi-line)
+  // Note: 42px (not 48px from CLAUDE.md) to keep multi-line wrapped text within frame
   const sLines = wrapText(sanskritText, 16);
   sLines.forEach((line, i) =>
     filters.push(dt({ text: line, font, size: 42, color: "#FFD700",
@@ -280,6 +287,7 @@ function buildVideo({ chapter, verse, sanskritText, transliteration, hindiSummar
                     enable: `between(t,${t.slide3Start},${t.slide3End})` }));
 
   // Slide 4 — Hindi meaning (white, multi-line)
+  // Note: 38px (not 40px from CLAUDE.md) to keep multi-line wrapped text within frame
   const hLines = wrapText(hindiSummary, 16);
   hLines.forEach((line, i) =>
     filters.push(dt({ text: line, font, size: 38, color: "white",
@@ -337,7 +345,7 @@ function buildVideo({ chapter, verse, sanskritText, transliteration, hindiSummar
     ...bgInputArgs,
     "-i", sanskritAudio,
     "-i", hindiAudio,
-    "-stream_loop", "-1", "-i", fluteAudio,
+    "-i", fluteAudio,
     "-filter_complex", filterComplex,
     "-map", "[vout]", "-map", "[aout]",
     "-c:v", "libx264", "-preset", "fast", "-crf", "23",
