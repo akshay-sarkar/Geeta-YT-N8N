@@ -364,3 +364,25 @@ function buildVideo({ chapter, verse, sanskritText, transliteration, hindiSummar
 }
 
 module.exports = { probeAudioDuration, computeSlides, WARN_DURATION, getAudioDuration, computeTimings, findFont, buildVideo };
+
+// ── CLI entry point ────────────────────────────────────────────────────────
+if (require.main === module) {
+  const argv = process.argv.slice(2);
+  const get = key => { const i = argv.indexOf("--" + key); return i >= 0 ? argv[i + 1] : null; };
+  const req = key => { const v = get(key); if (!v) { console.error(`Missing --${key}`); process.exit(1); } return v; };
+
+  const outputPath = req("output");
+  buildVideo({
+    chapter:         parseInt(req("chapter"), 10),
+    verse:           parseInt(req("verse"), 10),
+    sanskritText:    req("sanskrit-text"),
+    transliteration: req("transliteration"),
+    hindiSummary:    req("hindi-summary"),
+    sanskritAudio:   req("sanskrit-audio"),
+    hindiAudio:      req("hindi-audio"),
+    fluteAudio:      req("flute-audio"),
+    style:           req("style"),
+    outputPath,
+  });
+  console.log(`✓ ${outputPath}`);
+}
