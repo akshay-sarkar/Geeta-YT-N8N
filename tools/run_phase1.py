@@ -1,5 +1,5 @@
 # tools/run_phase1.py
-import os, json, argparse, subprocess, sys
+import os, json, argparse, subprocess, sys, time, glob
 from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
@@ -22,6 +22,14 @@ def find_flute() -> str:
 
 
 def run_shloka(chapter: int, verse: int, mock_audio: bool = False, force: bool = False) -> list[str]:
+    # Preflight: verify image pool exists if image style will be built
+    pool_images = glob.glob(os.path.join(KRISHNA_POOL, "*.jpg"))
+    if not pool_images:
+        raise FileNotFoundError(
+            f"No images found in {KRISHNA_POOL}/. "
+            "Run: python tools/fetch_krishna_images.py --count 60"
+        )
+
     os.makedirs(TMP_DIR, exist_ok=True)
     print(f"\n{'='*52}\nProcessing Ch.{chapter} V.{verse}\n{'='*52}")
 
@@ -49,6 +57,7 @@ def run_shloka(chapter: int, verse: int, mock_audio: bool = False, force: bool =
             hindi   = audio[f"hindi_{ver}"]
             out     = os.path.join(TMP_DIR, f"ch{chapter:02d}_v{verse:03d}_{style}_{ver}.mp4")
 
+            t_start = time.time()
             result = subprocess.run(
                 [
                     "node", "tools/build_video.js",
@@ -65,14 +74,15 @@ def run_shloka(chapter: int, verse: int, mock_audio: bool = False, force: bool =
                 ],
                 capture_output=True, text=True,
             )
+            elapsed = time.time() - t_start
 
             if result.returncode != 0:
-                print(f"  x {style}_{ver} FAILED", file=sys.stderr)
+                print(f"  ✗ {style}_{ver} FAILED", file=sys.stderr)
                 print(result.stderr[-600:], file=sys.stderr)
                 raise RuntimeError(f"build_video failed for {style}_{ver}")
 
             size_mb = Path(out).stat().st_size / 1_048_576
-            print(f"  ok {style}_{ver}: {out} ({size_mb:.1f} MB)")
+            print(f"  ✓ {style}_{ver}: {out} ({size_mb:.1f} MB, {elapsed:.1f}s)")
             outputs.append(out)
 
     return outputs
@@ -91,7 +101,8 @@ def main():
     args = parser.parse_args()
 
     if args.batch:
-        data    = json.load(open("data/gita.json", encoding="utf-8"))
+        with open("data/gita.json", encoding="utf-8") as f:
+            data = json.load(f)
         entries = data if isinstance(data, list) else [
             v for ch in data.get("chapters", []) for v in ch.get("verses", [])
         ]

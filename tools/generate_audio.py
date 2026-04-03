@@ -52,7 +52,7 @@ def generate_summaries(
     chapter: int,
     verse: int,
     sanskrit_text: str,
-    word_meanings: str,
+    translation: str,
     force: bool = False,
 ) -> tuple[str, str]:
     """Return (summary_v1, summary_v2). Cache-first — skips Claude if files exist."""
@@ -70,7 +70,7 @@ def generate_summaries(
 
         Shloka (Chapter {chapter}, Verse {verse}):
         Sanskrit: {sanskrit_text}
-        Word meanings: {word_meanings}
+        Translation: {translation}
 
         Write TWO distinct Hindi summaries of this shloka. Each should be:
         - 2-3 natural spoken sentences (suitable for a voice-over)
