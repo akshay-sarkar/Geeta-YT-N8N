@@ -1,6 +1,6 @@
 """generate_audio.py — ElevenLabs + Gemini audio generation with permanent cache."""
 from __future__ import annotations
-import os, pathlib, re, subprocess, textwrap
+import json, os, pathlib, re, subprocess, textwrap
 import requests
 from google import genai
 from dotenv import load_dotenv
@@ -8,6 +8,29 @@ from dotenv import load_dotenv
 load_dotenv()
 
 AUDIO_DIR = pathlib.Path("audio")
+SUMMARIES_JSON = AUDIO_DIR / "summaries.json"
+
+
+def _summary_key(chapter: int, verse: int) -> str:
+    return f"ch{chapter:02d}_v{verse:03d}"
+
+
+def _load_summaries_json() -> dict:
+    if SUMMARIES_JSON.exists():
+        try:
+            return json.loads(SUMMARIES_JSON.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _save_summaries_json(chapter: int, verse: int, s1: str, s2: str) -> None:
+    AUDIO_DIR.mkdir(exist_ok=True)
+    cache = _load_summaries_json()
+    cache[_summary_key(chapter, verse)] = {"v1": s1, "v2": s2}
+    SUMMARIES_JSON.write_text(
+        json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def audio_path(chapter: int, verse: int, kind: str, ext: str = "mp3") -> pathlib.Path:
@@ -54,15 +77,25 @@ def generate_summaries(
     translation: str,
     force: bool = False,
 ) -> tuple[str, str]:
-    """Return (summary_v1, summary_v2). Cache-first — skips Claude if files exist."""
+    """Return (summary_v1, summary_v2). Cache-first: JSON → .txt files → Gemini API."""
     p1 = audio_path(chapter, verse, "summary_v1", ext="txt")
     p2 = audio_path(chapter, verse, "summary_v2", ext="txt")
 
-    if not force and p1.exists() and p2.exists():
-        s1 = p1.read_text(encoding="utf-8")
-        s2 = p2.read_text(encoding="utf-8")
-        if s1.strip() and s2.strip():
-            return s1, s2
+    if not force:
+        # 1. Check JSON cache first
+        cache = _load_summaries_json()
+        entry = cache.get(_summary_key(chapter, verse))
+        if entry and entry.get("v1", "").strip() and entry.get("v2", "").strip():
+            return entry["v1"], entry["v2"]
+
+        # 2. Fall back to .txt files (backward compatibility)
+        if p1.exists() and p2.exists():
+            s1 = p1.read_text(encoding="utf-8")
+            s2 = p2.read_text(encoding="utf-8")
+            if s1.strip() and s2.strip():
+                # Migrate into JSON so future lookups skip the .txt check
+                _save_summaries_json(chapter, verse, s1, s2)
+                return s1, s2
 
     prompt = textwrap.dedent(f"""
         You are writing spoken Hindi summaries for a YouTube Shorts video about the Bhagavad Gita.
@@ -89,6 +122,7 @@ def generate_summaries(
     AUDIO_DIR.mkdir(exist_ok=True)
     p1.write_text(s1, encoding="utf-8")
     p2.write_text(s2, encoding="utf-8")
+    _save_summaries_json(chapter, verse, s1, s2)
 
     return s1, s2
 
