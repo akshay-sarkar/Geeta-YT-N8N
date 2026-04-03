@@ -177,3 +177,46 @@ def generate_speech(
         call_elevenlabs(text, voice_id, out, voice_settings)
 
     return out
+
+
+# Voice IDs (from spec)
+VOICE_TAKSH = "qDuRKMlYmrm8trt5QyBn"   # Sanskrit
+VOICE_NIRAJ = "zgqefOY5FPQ3bB7OZTVR"   # Hindi
+
+VOICE_SETTINGS_TAKSH = {"stability": 0.75, "similarity_boost": 0.75, "style": 0.30, "use_speaker_boost": True}
+VOICE_SETTINGS_NIRAJ = {"stability": 0.60, "similarity_boost": 0.75, "style": 0.45, "use_speaker_boost": True}
+
+
+def generate_audio_files(
+    shloka: dict,
+    summary_v1: str,
+    summary_v2: str,
+    mock: bool = False,
+    force: bool = False,
+) -> dict[str, str]:
+    """Generate all 3 audio files for a shloka. Returns dict of absolute path strings.
+
+    Returns:
+        {"sanskrit": str, "hindi_v1": str, "hindi_v2": str}
+    """
+    ch = shloka["chapter_number"]
+    vs = shloka["verse_number"]
+
+    sanskrit_path = generate_speech(
+        ch, vs, "sanskrit", shloka["text"], VOICE_TAKSH,
+        mock_audio=mock, force=force, voice_settings=VOICE_SETTINGS_TAKSH,
+    )
+    hindi_v1_path = generate_speech(
+        ch, vs, "hindi_v1", summary_v1, VOICE_NIRAJ,
+        mock_audio=mock, force=force, voice_settings=VOICE_SETTINGS_NIRAJ,
+    )
+    hindi_v2_path = generate_speech(
+        ch, vs, "hindi_v2", summary_v2, VOICE_NIRAJ,
+        mock_audio=mock, force=force, voice_settings=VOICE_SETTINGS_NIRAJ,
+    )
+
+    return {
+        "sanskrit": str(sanskrit_path),
+        "hindi_v1": str(hindi_v1_path),
+        "hindi_v2": str(hindi_v2_path),
+    }
