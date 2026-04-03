@@ -18,7 +18,7 @@ def test_parse_two_summaries():
     assert "अर्जुन" in s1
     assert "कर्म" in s2
 
-def test_summary_cache_hit_skips_claude(tmp_path, monkeypatch):
+def test_summary_cache_hit_skips_gemini(tmp_path, monkeypatch):
     from generate_audio import generate_summaries
     monkeypatch.chdir(tmp_path)
     audio_dir = tmp_path / "audio"
@@ -27,14 +27,14 @@ def test_summary_cache_hit_skips_claude(tmp_path, monkeypatch):
     (audio_dir / "ch02_v047_summary_v2.txt").write_text("दूसरी सारांश", encoding="utf-8")
 
     called = []
-    def fake_claude(*a, **kw):
+    def fake_gemini(*a, **kw):
         called.append(1)
-    monkeypatch.setattr("generate_audio.call_claude", fake_claude)
+    monkeypatch.setattr("generate_audio.call_gemini", fake_gemini)
 
     s1, s2 = generate_summaries(2, 47, "Sanskrit text", "word meanings")
     assert s1 == "पहली सारांश"
     assert s2 == "दूसरी सारांश"
-    assert called == [], "Claude must not be called when cache files exist"
+    assert called == [], "Gemini must not be called when cache files exist"
 
 
 def test_generate_speech_cache_hit_skips_elevenlabs(tmp_path, monkeypatch):

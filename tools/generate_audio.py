@@ -1,8 +1,8 @@
-"""generate_audio.py — ElevenLabs + Claude audio generation with permanent cache."""
+"""generate_audio.py — ElevenLabs + Gemini audio generation with permanent cache."""
 from __future__ import annotations
 import os, pathlib, re, subprocess, textwrap
-import anthropic
 import requests
+from google import genai
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,18 +34,17 @@ def parse_summaries(raw: str) -> tuple[str, str]:
     raise ValueError(f"parse_summaries: expected 2 summaries, got 1. Raw: {raw[:200]!r}")
 
 
-def call_claude(prompt: str) -> str:
-    """Call Claude API and return the text response."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+def call_gemini(prompt: str) -> str:
+    """Call Gemini API and return the text response."""
+    api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        raise EnvironmentError("ANTHROPIC_API_KEY is not set in environment or .env")
-    client = anthropic.Anthropic(api_key=api_key)
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=512,
-        messages=[{"role": "user", "content": prompt}],
+        raise EnvironmentError("GEMINI_API_KEY is not set in environment or .env")
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
     )
-    return message.content[0].text
+    return response.text
 
 
 def generate_summaries(
@@ -84,7 +83,7 @@ def generate_summaries(
         Summary 2: <second summary in Hindi>
     """).strip()
 
-    raw = call_claude(prompt)
+    raw = call_gemini(prompt)
     s1, s2 = parse_summaries(raw)
 
     AUDIO_DIR.mkdir(exist_ok=True)
