@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-TOKEN_FILE = pathlib.Path("data/youtube_token.json")
+TOKEN_FILE = pathlib.Path(__file__).parent.parent / "data" / "youtube_token.json"
 SCOPES     = ["https://www.googleapis.com/auth/youtube.upload",
                "https://www.googleapis.com/auth/youtube"]
 
@@ -36,6 +36,7 @@ def _build_client_config() -> dict:
 
 
 def _get_credentials():
+    from datetime import datetime, timezone
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
     from google.auth.transport.requests import Request
@@ -43,6 +44,8 @@ def _get_credentials():
     creds = None
     if TOKEN_FILE.exists():
         data = json.loads(TOKEN_FILE.read_text(encoding="utf-8"))
+        expiry_str = data.get("expiry")
+        expiry = datetime.fromisoformat(expiry_str).replace(tzinfo=timezone.utc) if expiry_str else None
         creds = Credentials(
             token=data.get("token"),
             refresh_token=data.get("refresh_token"),
@@ -50,6 +53,7 @@ def _get_credentials():
             client_id=os.environ["YOUTUBE_CLIENT_ID"],
             client_secret=os.environ["YOUTUBE_CLIENT_SECRET"],
             scopes=SCOPES,
+            expiry=expiry,
         )
 
     if not creds or not creds.valid:
@@ -58,8 +62,13 @@ def _get_credentials():
         else:
             flow = InstalledAppFlow.from_client_config(_build_client_config(), SCOPES)
             creds = flow.run_local_server(port=0)
+        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
         TOKEN_FILE.write_text(
-            json.dumps({"token": creds.token, "refresh_token": creds.refresh_token}),
+            json.dumps({
+                "token": creds.token,
+                "refresh_token": creds.refresh_token,
+                "expiry": creds.expiry.isoformat() if creds.expiry else None,
+            }),
             encoding="utf-8",
         )
 
@@ -72,6 +81,9 @@ def auth_only() -> None:
 
 
 def upload_video(video_path: str, title: str, description: str, playlist_id: str) -> str:
+    if not playlist_id:
+        raise ValueError("playlist_id must not be empty")
+
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
 
@@ -97,20 +109,28 @@ def upload_video(video_path: str, title: str, description: str, playlist_id: str
 
     video_id = response["id"]
 
-    youtube.playlistItems().insert(
-        part="snippet",
-        body={
-            "snippet": {
-                "playlistId": playlist_id,
-                "resourceId": {"kind": "youtube#video", "videoId": video_id},
-            }
-        },
-    ).execute()
+    try:
+        youtube.playlistItems().insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "playlistId": playlist_id,
+                    "resourceId": {"kind": "youtube#video", "videoId": video_id},
+                }
+            },
+        ).execute()
+    except Exception as exc:
+        print(f"Warning: playlist insert failed: {exc}", file=sys.stderr)
 
     return f"https://www.youtube.com/watch?v={video_id}"
 
 
 if __name__ == "__main__":
+    for key in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET"):
+        if not os.environ.get(key):
+            print(f"Missing required env var: {key}", file=sys.stderr)
+            sys.exit(1)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--auth",        action="store_true",
                         help="Run OAuth2 consent flow and save token")
