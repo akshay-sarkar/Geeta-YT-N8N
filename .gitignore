@@ -8,3 +8,4 @@ node_modules/
 .DS_Store
 *.docx
 ~$*
+data/youtube_token.json
