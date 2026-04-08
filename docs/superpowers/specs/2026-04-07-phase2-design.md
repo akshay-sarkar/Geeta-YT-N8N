@@ -36,11 +36,13 @@ python tools/state.py read     # prints JSON to stdout: {"chapter": 1, "verse": 
 python tools/state.py advance  # increments to next verse, wraps chapters correctly, writes file
 ```
 
-**Advance logic:** Looks up current chapter/verse in `data/gita.json` array order. Moves to next entry. When the last verse of a chapter is reached, moves to chapter+1 verse 1. When all 700 shlokas are exhausted, wraps back to chapter 1 verse 1.
+**Advance logic:** Looks up current chapter/verse in `data/gita.json` array order. Moves to next entry. When the last verse of a chapter is reached, moves to chapter+1 verse 1. When the last verse of chapter 18 (verse 78) is advanced past, writes `{ "done": true }` — pipeline stops permanently.
 
-**Initialisation:** If `data/state.json` does not exist, `read` creates it starting at chapter 1, verse 1.
+**Initialisation:** `data/state.json` is pre-created starting at chapter 1, verse 2 (verse 1 was manually uploaded during Phase 1 testing).
 
-**N8N usage:** Execute Command node captures stdout of `read`; a downstream Set node parses the JSON to extract `chapter` and `verse` as workflow variables.
+**Exhaustion:** When `advance` is called on the final verse (chapter 18, verse 78), it writes `{ "chapter": null, "verse": null, "done": true }` to `state.json`. On the next run, `read` outputs `{"done": true}` and the N8N workflow detects this, sends a Telegram message "✅ All 700 shlokas uploaded. Pipeline complete.", then stops (no further execution).
+
+**N8N usage:** Execute Command node captures stdout of `read`; a downstream IF node checks for `done: true` — if true, sends completion Telegram and stops; otherwise parses `chapter`/`verse` and continues the pipeline.
 
 ---
 
@@ -106,7 +108,10 @@ python tools/upload_youtube.py \
 ```
 Cron (*/15 * * * *)
   → Execute Command: python tools/state.py read
-  → Code node: parse JSON, set chapter/verse variables
+  → Code node: parse JSON
+  → IF node: done == true?
+      YES → HTTP Request: Telegram "✅ All 700 shlokas uploaded. Pipeline complete." → STOP
+      NO  → set chapter/verse variables
   → Execute Command: python run_phase1.py --chapter {{chapter}} --verse {{verse}}
   → Execute Command: python tools/youtube_metadata.py --chapter {{chapter}} --verse {{verse}}
   → Code node: parse metadata JSON, set title/description variables
