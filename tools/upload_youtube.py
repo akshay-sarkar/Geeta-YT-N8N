@@ -45,7 +45,7 @@ def _get_credentials():
     if TOKEN_FILE.exists():
         data = json.loads(TOKEN_FILE.read_text(encoding="utf-8"))
         expiry_str = data.get("expiry")
-        expiry = datetime.fromisoformat(expiry_str).replace(tzinfo=timezone.utc) if expiry_str else None
+        expiry = datetime.fromisoformat(expiry_str).replace(tzinfo=None) if expiry_str else None
         creds = Credentials(
             token=data.get("token"),
             refresh_token=data.get("refresh_token"),

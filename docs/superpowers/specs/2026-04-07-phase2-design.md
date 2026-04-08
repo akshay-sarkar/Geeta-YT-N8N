@@ -58,7 +58,7 @@ python tools/youtube_metadata.py --chapter 1 --verse 1
 ```json
 {
   "title": "Bhagavad Gita - Adhyay 1 Shloka 1",
-  "description": "Shloka: <sanskrit text, \\n removed, trimmed>\n\nMeaning: <Swami Gambirananda description, \\n removed, trimmed>\nAuthor: Swami Gambirananda\n\n#BhagavadGita #GitaShlokas #Krishna #Adhyay1"
+  "description": "Shloka: <sanskrit text, \\n removed, trimmed>\n\nMeaning: <Swami Gambirananda description, \\n removed, trimmed>\n#BhagavadGita #GitaShlokas #Krishna #Adhyay1"
 }
 ```
 

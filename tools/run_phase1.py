@@ -21,7 +21,7 @@ def find_flute() -> str:
     return os.path.join(FLUTE_DIR, files[0])
 
 
-def run_shloka(chapter: int, verse: int, mock_audio: bool = False, force: bool = False) -> list[str]:
+def run_shloka(chapter: int, verse: int, mock_audio: bool = False, force: bool = False, image_only: bool = False) -> list[str]:
     # Preflight: verify image pool exists if image style will be built
     pool_images = glob.glob(os.path.join(KRISHNA_POOL, "*.jpg"))
     if not pool_images:
@@ -49,9 +49,10 @@ def run_shloka(chapter: int, verse: int, mock_audio: bool = False, force: bool =
 
     flute   = find_flute()
     outputs = []
-    print("[4/4] Building 4 videos...")
+    styles  = ("image",) if image_only else ("plain", "image")
+    print(f"[4/4] Building {len(styles) * 2} videos...")
 
-    for style in ("plain", "image"):
+    for style in styles:
         for ver in ("v1", "v2"):
             summary = v1 if ver == "v1" else v2
             hindi   = audio[f"hindi_{ver}"]
@@ -98,6 +99,8 @@ def main():
                         help="Use macOS say instead of Gemini TTS")
     parser.add_argument("--force-audio", action="store_true",
                         help="Regenerate audio even if cached")
+    parser.add_argument("--image-only",  action="store_true",
+                        help="Build image variants only (skip plain) — faster for pipeline use")
     args = parser.parse_args()
 
     if args.batch:
@@ -112,7 +115,8 @@ def main():
             run_shloka(ch, vs, mock_audio=args.mock_audio, force=args.force_audio)
     elif args.chapter and args.verse:
         outs = run_shloka(args.chapter, args.verse,
-                          mock_audio=args.mock_audio, force=args.force_audio)
+                          mock_audio=args.mock_audio, force=args.force_audio,
+                          image_only=args.image_only)
         print(f"\nDone -- {len(outs)} videos in {TMP_DIR}/")
     else:
         parser.print_help()
