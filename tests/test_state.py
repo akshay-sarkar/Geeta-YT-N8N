@@ -1,5 +1,4 @@
 import json
-import io
 import pytest
 import tools.state as state_mod
 
@@ -15,15 +14,6 @@ def _write_json(path, obj):
 
 def _read_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-@pytest.fixture(autouse=True)
-def patch_paths(tmp_path, monkeypatch):
-    state_file = tmp_path / "state.json"
-    gita_file = tmp_path / "gita.json"
-    monkeypatch.setattr(state_mod, "STATE_JSON", state_file)
-    monkeypatch.setattr(state_mod, "GITA_JSON", gita_file)
-    return state_file, gita_file
 
 
 def test_read_creates_initial_state_if_missing(tmp_path, monkeypatch, capsys):
