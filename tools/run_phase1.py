@@ -42,7 +42,7 @@ def run_shloka(chapter: int, verse: int, mock_audio: bool = False, force: bool =
     print(f"  v1: {v1[:55]}...")
     print(f"  v2: {v2[:55]}...")
 
-    print(f"[3/4] Generating audio ({'mock' if mock_audio else 'ElevenLabs'})...")
+    print(f"[3/4] Generating audio ({'mock' if mock_audio else 'Gemini TTS'})...")
     audio = generate_audio_files(shloka, v1, v2, mock=mock_audio, force=force)
     for k, p in audio.items():
         print(f"  {k}: {p}")
@@ -95,7 +95,7 @@ def main():
     parser.add_argument("--batch",       type=int,
                         help="Process first N shlokas in dataset order (Ch1 V1 onwards)")
     parser.add_argument("--mock-audio",  action="store_true",
-                        help="Use macOS say instead of ElevenLabs")
+                        help="Use macOS say instead of Gemini TTS")
     parser.add_argument("--force-audio", action="store_true",
                         help="Regenerate audio even if cached")
     args = parser.parse_args()

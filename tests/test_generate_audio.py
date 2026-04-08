@@ -37,7 +37,7 @@ def test_summary_cache_hit_skips_gemini(tmp_path, monkeypatch):
     assert called == [], "Gemini must not be called when cache files exist"
 
 
-def test_generate_speech_cache_hit_skips_elevenlabs(tmp_path, monkeypatch):
+def test_generate_speech_cache_hit_skips_gemini_tts(tmp_path, monkeypatch):
     from generate_audio import generate_speech
     monkeypatch.chdir(tmp_path)
     audio_dir = tmp_path / "audio"
@@ -45,13 +45,13 @@ def test_generate_speech_cache_hit_skips_elevenlabs(tmp_path, monkeypatch):
     (audio_dir / "ch02_v047_sanskrit.mp3").write_bytes(b"fake-mp3-data")
 
     called = []
-    def fake_elevenlabs(*a, **kw):
+    def fake_gemini_tts(*a, **kw):
         called.append(1)
-    monkeypatch.setattr("generate_audio.call_elevenlabs", fake_elevenlabs)
+    monkeypatch.setattr("generate_audio.call_gemini_tts", fake_gemini_tts)
 
-    result = generate_speech(2, 47, "sanskrit", "text", "voice-id", mock_audio=False)
+    result = generate_speech(2, 47, "sanskrit", "text", "Callirrhoe", mock_audio=False)
     assert result == audio_dir / "ch02_v047_sanskrit.mp3"
-    assert called == [], "ElevenLabs must not be called when cache file exists"
+    assert called == [], "Gemini TTS must not be called when cache file exists"
 
 def test_generate_speech_mock_uses_say(tmp_path, monkeypatch):
     from generate_audio import generate_speech

@@ -1,8 +1,8 @@
-"""generate_audio.py — ElevenLabs + Gemini audio generation with permanent cache."""
+"""generate_audio.py — Gemini TTS + Gemini text generation with permanent cache."""
 from __future__ import annotations
 import json, os, pathlib, re, subprocess, textwrap
-import requests
 from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,7 +39,7 @@ def audio_path(chapter: int, verse: int, kind: str, ext: str = "mp3") -> pathlib
 
 
 def parse_summaries(raw: str) -> tuple[str, str]:
-    """Extract the two Hindi summaries from Claude's response.
+    """Extract the two Hindi summaries from Gemini's response.
 
     Expected format (flexible):
         Summary 1: <text>
@@ -127,45 +127,44 @@ def generate_summaries(
     return s1, s2
 
 
-ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-ELEVENLABS_MODEL = "eleven_multilingual_v2"
+GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 
 
-def call_elevenlabs(
-    text: str,
-    voice_id: str,
-    output_path: pathlib.Path,
-    voice_settings: dict | None = None,
-) -> None:
-    """Call ElevenLabs TTS API and write MP3 to output_path."""
-    api_key = os.environ.get("ELEVENLABS_API_KEY")
+def call_gemini_tts(text: str, voice_name: str, output_path: pathlib.Path) -> None:
+    """Call Gemini TTS API and write MP3 to output_path."""
+    api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        raise EnvironmentError("ELEVENLABS_API_KEY is not set in environment or .env")
-    url = ELEVENLABS_API_URL.format(voice_id=voice_id)
-    settings = voice_settings or {
-        "stability": 0.75,
-        "similarity_boost": 0.75,
-        "style": 0.30,
-        "use_speaker_boost": True,
-    }
-    payload = {
-        "text": text,
-        "model_id": ELEVENLABS_MODEL,
-        "voice_settings": settings,
-    }
-    resp = requests.post(
-        url,
-        json=payload,
-        headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-        timeout=60,
+        raise EnvironmentError("GEMINI_API_KEY is not set in environment or .env")
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=GEMINI_TTS_MODEL,
+        contents=text,
+        config=types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
+                )
+            ),
+        ),
     )
-    try:
-        resp.raise_for_status()
-    except Exception as exc:
+    candidate = response.candidates[0]
+    if str(candidate.finish_reason) == "FinishReason.OTHER":
         raise RuntimeError(
-            f"ElevenLabs API error {resp.status_code}: {resp.text[:500]}"
-        ) from exc
-    output_path.write_bytes(resp.content)
+            f"Gemini TTS returned FinishReason.OTHER for voice {voice_name!r} — "
+            "voice may not support this script/language"
+        )
+    part = candidate.content.parts[0]
+    if not hasattr(part, "inline_data") or not part.inline_data:
+        raise RuntimeError(f"Gemini TTS returned no audio data for voice {voice_name!r}")
+    pcm = part.inline_data.data
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", "pipe:0", str(output_path)],
+        input=pcm,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg PCM→MP3 conversion failed: {proc.stderr.decode()}")
 
 
 def generate_speech(
@@ -173,16 +172,14 @@ def generate_speech(
     verse: int,
     kind: str,
     text: str,
-    voice_id: str,
+    voice_name: str,
     mock_audio: bool = False,
     force: bool = False,
-    voice_settings: dict | None = None,
 ) -> pathlib.Path:
     """Generate MP3 for the given text. Cache-first.
 
     kind: one of "sanskrit", "hindi_v1", "hindi_v2"
-    mock_audio: use macOS `say` command instead of ElevenLabs (free, for dev/testing)
-    voice_settings: optional ElevenLabs voice_settings dict; uses per-voice defaults if None
+    mock_audio: use macOS `say` command instead of Gemini TTS (free, for dev/testing)
     """
     out = audio_path(chapter, verse, kind).resolve()
     if not force and out.exists():
@@ -207,17 +204,14 @@ def generate_speech(
         if not out.exists():
             raise RuntimeError(f"mock audio generation succeeded but output not found: {out}")
     else:
-        call_elevenlabs(text, voice_id, out, voice_settings)
+        call_gemini_tts(text, voice_name, out)
 
     return out
 
 
-# Voice IDs (from spec)
-VOICE_TAKSH = "qDuRKMlYmrm8trt5QyBn"   # Sanskrit
-VOICE_NIRAJ = "zgqefOY5FPQ3bB7OZTVR"   # Hindi
-
-VOICE_SETTINGS_TAKSH = {"stability": 0.75, "similarity_boost": 0.75, "style": 0.30, "use_speaker_boost": True}
-VOICE_SETTINGS_NIRAJ = {"stability": 0.60, "similarity_boost": 0.75, "style": 0.45, "use_speaker_boost": True}
+# Voice names (Gemini TTS)
+VOICE_SANSKRIT = "Callirrhoe"  # Sanskrit recitation
+VOICE_HINDI = "Leda"           # Hindi narration
 
 
 def generate_audio_files(
@@ -236,16 +230,16 @@ def generate_audio_files(
     vs = shloka["verse_number"]
 
     sanskrit_path = generate_speech(
-        ch, vs, "sanskrit", shloka["text"], VOICE_TAKSH,
-        mock_audio=mock, force=force, voice_settings=VOICE_SETTINGS_TAKSH,
+        ch, vs, "sanskrit", shloka["text"], VOICE_SANSKRIT,
+        mock_audio=mock, force=force,
     )
     hindi_v1_path = generate_speech(
-        ch, vs, "hindi_v1", summary_v1, VOICE_NIRAJ,
-        mock_audio=mock, force=force, voice_settings=VOICE_SETTINGS_NIRAJ,
+        ch, vs, "hindi_v1", summary_v1, VOICE_HINDI,
+        mock_audio=mock, force=force,
     )
     hindi_v2_path = generate_speech(
-        ch, vs, "hindi_v2", summary_v2, VOICE_NIRAJ,
-        mock_audio=mock, force=force, voice_settings=VOICE_SETTINGS_NIRAJ,
+        ch, vs, "hindi_v2", summary_v2, VOICE_HINDI,
+        mock_audio=mock, force=force,
     )
 
     return {

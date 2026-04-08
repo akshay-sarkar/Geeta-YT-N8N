@@ -233,9 +233,11 @@ function esc(t) {
 }
 
 /** Returns one drawtext filter string. */
-function dt({ text, font, size, color, x, y, enable }) {
-  return `drawtext=fontfile='${font}':text='${esc(text)}':fontcolor=${color}` +
-         `:fontsize=${size}:x=${x}:y=${y}:enable='${enable}'`;
+function dt({ text, font, size, color, x, y, enable, bold = false }) {
+  let f = `drawtext=fontfile='${font}':text='${esc(text)}':fontcolor=${color}` +
+          `:fontsize=${size}:x=${x}:y=${y}:enable='${enable}'`;
+  if (bold) f += `:borderw=2:bordercolor=${color}`;
+  return f;
 }
 
 /**
@@ -264,51 +266,60 @@ function buildVideo({ chapter, verse, sanskritText, transliteration, hindiSummar
   }
 
   // ── Text overlay filters ──────────────────────────────────────────────
-  const LINE_H = 54;
+  const LINE_H = 62;
   const filters = [];
 
-  // Top label — always visible
-  filters.push(dt({ text: `Chapter ${chapter} | Shloka ${verse}`,
-                    font, size: 26, color: "white@0.60",
-                    x: "(w-text_w)/2", y: "90", enable: "gte(t,0)" }));
+  // Top label — 2-line header: brand + chapter reference
+  filters.push(dt({ text: "- Bhagavad Gita -",
+                    font, size: 28, color: "#FFD700@0.88",
+                    x: "(w-text_w)/2", y: "55", enable: "gte(t,0)" }));
+  filters.push(dt({ text: `Adhyay ${chapter}  |  Shloka ${verse}`,
+                    font, size: 44, color: "white@0.92",
+                    x: "(w-text_w)/2", y: "100", enable: "gte(t,0)" }));
 
-  // Slide 2 — Sanskrit (yellow, multi-line)
-  // Note: 42px (not 48px from CLAUDE.md) to keep multi-line wrapped text within frame
-  const sLines = wrapText(sanskritText, 16);
+  // Slide 2 — Sanskrit (golden, multi-line) — block centred at 65% from top
+  const sLines = wrapText(sanskritText, 20);
   sLines.forEach((line, i) =>
-    filters.push(dt({ text: line, font, size: 42, color: "#FFD700",
+    filters.push(dt({ text: line, font, size: 50, color: "#FFD700",
                       x: "(w-text_w)/2",
-                      y: `(h-${sLines.length * LINE_H})/2-20+${i * LINE_H}`,
+                      y: `h*0.65-${Math.round(sLines.length * LINE_H / 2)}+${i * LINE_H}`,
                       enable: `between(t,${t.slide2Start},${t.slide2End})` }))
   );
 
-  // Slide 3 — Transliteration (white, centered)
-  filters.push(dt({ text: transliteration, font, size: 26, color: "white@0.80",
-                    x: "(w-text_w)/2", y: "(h-text_h)/2",
-                    enable: `between(t,${t.slide3Start},${t.slide3End})` }));
+  // Slide 3 — 1.5s silent gap (no text)
 
-  // Slide 4 — Hindi meaning (white, multi-line)
-  // Note: 38px (not 40px from CLAUDE.md) to keep multi-line wrapped text within frame
-  const hLines = wrapText(hindiSummary, 16);
+  // Slide 4 — Hindi meaning (golden, multi-line) — block centred at 65% from top
+  const hLines = wrapText(hindiSummary, 20);
   hLines.forEach((line, i) =>
-    filters.push(dt({ text: line, font, size: 38, color: "white",
+    filters.push(dt({ text: line, font, size: 46, color: "#FFD700",
                       x: "(w-text_w)/2",
-                      y: `(h-${hLines.length * LINE_H})/2-20+${i * LINE_H}`,
+                      y: `h*0.65-${Math.round(hLines.length * LINE_H / 2)}+${i * LINE_H}`,
                       enable: `between(t,${t.slide4Start},${t.slide4End})` }))
   );
 
-  // Watermark — always visible
-  filters.push(dt({ text: "@GitaShlokas", font, size: 22, color: "white@0.35",
-                    x: "(w-text_w)/2", y: "h-70", enable: "gte(t,0)" }));
+  // Slide 5 — Outro call-to-action
+  filters.push(dt({ text: "Follow us for more",
+                    font, size: 44, color: "white@0.90",
+                    x: "(w-text_w)/2", y: "(h-text_h)/2",
+                    enable: `between(t,${t.slide4End},${t.totalDur})` }));
+
+  // Watermark text — channel handle (logo overlaid separately via overlay filter)
+  filters.push(dt({ text: "@Krishna-GeetaShlokas", font, size: 34, color: "white@0.50",
+                    x: "390", y: "h-85", enable: "gte(t,0)" }));
 
   const textFilters = filters.join(",");
 
   // ── Background ────────────────────────────────────────────────────────
+  const logoPath = path.join(__dirname, "../images/yt-logo.png");
   let bgInputArgs, bgFilter;
   if (style === "plain") {
     bgInputArgs = ["-f", "lavfi", "-i",
-                   `color=c=0x1c0a00:s=1080x1920:r=30:d=${t.totalDur}`];
-    bgFilter = `[0:v]${textFilters}[vout]`;
+                   `color=c=0x0e0508:s=1080x1920:r=30:d=${t.totalDur}`];
+    // Slow-breathing golden radial glow centred mid-frame (geq on lavfi color source)
+    const geqR = "28+18*sin(2*3.14159*T/9)*exp(-((X-W/2)*(X-W/2)+(Y-H*0.45)*(Y-H*0.45))/(W*W*0.18))+4*sin(2*3.14159*T/3.5)";
+    const geqG = "7+5*sin(2*3.14159*T/9)*exp(-((X-W/2)*(X-W/2)+(Y-H*0.45)*(Y-H*0.45))/(W*W*0.18))";
+    const geqB = "2+sin(2*3.14159*T/11)";
+    bgFilter = `[0:v]geq=r='${geqR}':g='${geqG}':b='${geqB}',drawbox=x=0:y=0:w=iw:h=175:color=black@0.65:t=fill,${textFilters}[vtext]`;
   } else {
     const imgs = fs.readdirSync(krishnaPoolDir).filter(f => /\.jpg$/i.test(f));
     if (!imgs.length) throw new Error(`No images in ${krishnaPoolDir}. Run fetch_krishna_images.py first.`);
@@ -317,8 +328,10 @@ function buildVideo({ chapter, verse, sanskritText, transliteration, hindiSummar
     bgInputArgs = ["-loop", "1", "-framerate", "30", "-t", String(t.totalDur), "-i", img];
     bgFilter = `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,` +
                `crop=1080:1920,fps=30,` +
+               `eq=saturation=1.4,` +
                `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.60:t=fill,` +
-               `${textFilters}[vout]`;
+               `drawbox=x=0:y=0:w=iw:h=175:color=black@0.40:t=fill,` +
+               `${textFilters}[vtext]`;
   }
 
   // ── Audio ─────────────────────────────────────────────────────────────
@@ -332,6 +345,8 @@ function buildVideo({ chapter, verse, sanskritText, transliteration, hindiSummar
     `if(gt(between(t\\,${t.slide2Start}\\,${t.slide2End})` +
     `+between(t\\,${t.slide4Start}\\,${t.slide4End})\\,0)\\,0.1\\,0.2)`;
 
+  // Logo is input [4:v] (after bg[0], skt[1], hnd[2], flute[3])
+  // Scale logo to 55x38 and overlay bottom-center alongside the text
   const filterComplex = [
     bgFilter,
     `[1:a]adelay=${s2ms}|${s2ms},apad=whole_dur=${t.totalDur}[skt]`,
@@ -339,6 +354,8 @@ function buildVideo({ chapter, verse, sanskritText, transliteration, hindiSummar
     `[3:a]aloop=loop=-1:size=2000000000,atrim=0:${t.totalDur},` +
         `volume='${fluteExpr}':eval=frame[flute]`,
     `[skt][hnd][flute]amix=inputs=3:normalize=0:dropout_transition=0[aout]`,
+    `[4:v]scale=55:38,format=rgba,colorchannelmixer=aa=0.75[logo]`,
+    `[vtext][logo]overlay=x=325:y=H-88[vout]`,
   ].join(";");
 
   const args = [
@@ -347,6 +364,7 @@ function buildVideo({ chapter, verse, sanskritText, transliteration, hindiSummar
     "-i", sanskritAudio,
     "-i", hindiAudio,
     "-i", fluteAudio,
+    "-loop", "1", "-i", logoPath,
     "-filter_complex", filterComplex,
     "-map", "[vout]", "-map", "[aout]",
     "-c:v", "libx264", "-preset", "fast", "-crf", "23",
