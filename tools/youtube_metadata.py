@@ -30,6 +30,9 @@ def generate_metadata(chapter: int, verse: int) -> dict:
     gita = _load_gita()
     gambh = _load_gambhirananda()
 
+    if not gambh:
+        raise ValueError(f"No translations found for author '{GAMBHIRANANDA}' — check author name filter")
+
     idx = next(
         (i for i, e in enumerate(gita) if e["chapter_number"] == chapter and e["verse_number"] == verse),
         None,
