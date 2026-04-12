@@ -1,0 +1,156 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1775949625928,
+  "projectRoot": "/Users/akshaysarkar/Documents/Projects/Geeta-YT-N8N",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "requirements.txt"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "npm",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": "npm test",
+    "lintCommand": null,
+    "devCommand": "npm run start",
+    "scripts": {
+      "test": "echo \"Error: no test specified\" && exit 1",
+      "start": "n8n"
+    }
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "audio": {
+      "path": "audio",
+      "purpose": null,
+      "fileCount": 108,
+      "lastAccessed": 1775949625880,
+      "keyFiles": [
+        "ch01_v001_hindi_v1.mp3",
+        "ch01_v001_hindi_v2.mp3",
+        "ch01_v001_sanskrit.mp3",
+        "ch01_v001_summary_v1.txt",
+        "ch01_v001_summary_v2.txt"
+      ]
+    },
+    "audio-sample-flute": {
+      "path": "audio-sample-flute",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1775949625905,
+      "keyFiles": [
+        "krishna Background Music No Copyright [ Flute Music ] ( Release By Audio Studio )#audiostudio.mp3"
+      ]
+    },
+    "data": {
+      "path": "data",
+      "purpose": "Data files",
+      "fileCount": 4,
+      "lastAccessed": 1775949625906,
+      "keyFiles": [
+        "gita.json",
+        "state.json",
+        "translation.json",
+        "youtube_token.json"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 0,
+      "lastAccessed": 1775949625906,
+      "keyFiles": []
+    },
+    "images": {
+      "path": "images",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1775949625906,
+      "keyFiles": [
+        "yt-logo.png"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 6,
+      "lastAccessed": 1775949625906,
+      "keyFiles": [
+        "test_build_video.js",
+        "test_fetch_krishna_images.py",
+        "test_fetch_shloka.py",
+        "test_generate_audio.py",
+        "test_state.py"
+      ]
+    },
+    "tools": {
+      "path": "tools",
+      "purpose": null,
+      "fileCount": 9,
+      "lastAccessed": 1775949625907,
+      "keyFiles": [
+        "__init__.py",
+        "build_video.js",
+        "fetch_krishna_images.py",
+        "fetch_shloka.py",
+        "generate_audio.py"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "CLAUDE.md",
+      "accessCount": 4,
+      "lastAccessed": 1775949804046,
+      "type": "file"
+    },
+    {
+      "path": "data/state.json",
+      "accessCount": 1,
+      "lastAccessed": 1775949776329,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 1,
+      "lastAccessed": 1775949779351,
+      "type": "directory"
+    }
+  ],
+  "userDirectives": []
+}

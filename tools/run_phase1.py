@@ -61,7 +61,7 @@ def run_shloka(chapter: int, verse: int, mock_audio: bool = False, force: bool =
             t_start = time.time()
             result = subprocess.run(
                 [
-                    "node", "tools/build_video.js",
+                    "/usr/local/bin/node", "tools/build_video.js",
                     "--chapter",         str(chapter),
                     "--verse",           str(verse),
                     "--sanskrit-text",   shloka["text"],

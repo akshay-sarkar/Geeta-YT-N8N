@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-YouTube automation pipeline that produces and publishes one Bhagavad Gita Shloka Short per day â€” covering all 700 shlokas across 18 chapters with zero manual effort once live.
+YouTube automation pipeline that produces and publishes one Bhagavad Gita Shloka Short per day Ñ covering all 700 shlokas across 18 chapters with zero manual effort once live.
 
 This project follows the **WAT framework** (Workflows, Agents, Tools) defined in the parent `CLAUDE.md`. Read it before building anything new.
 
@@ -13,15 +13,17 @@ This project follows the **WAT framework** (Workflows, Agents, Tools) defined in
 ## Architecture
 
 The pipeline is orchestrated in **N8N (self-hosted)** on a daily cron schedule. Each run:
-1. Reads the next shloka from a JSON state tracker
-2. Calls **Claude API** to generate a Hindi summary + YouTube metadata
-3. Calls **ElevenLabs** twice â€” Sanskrit audio (Taksh voice), Hindi audio (Niraj voice)
-4. Fetches a background image from **Pexels API**
-5. Uses **FFmpeg** (via Node.js Execute Command nodes) to build 5 slides and concat into a final video with background music ducked under voice
-6. Uploads to **YouTube** via Data API v3
-7. Sends a **Telegram** notification with video link or failure details
+1. Reads the next shloka from `data/state.json` via `tools/state.py`
+2. Calls **Gemini 2.5 Flash API** to generate a Hindi summary (replaced Claude API)
+3. Calls **ElevenLabs** twice Ñ Sanskrit audio (Taksh voice), Hindi audio (Niraj voice)
+4. Fetches a background image from a local `images/krishna-pool/` directory (pre-fetched via Pexels)
+5. Uses **FFmpeg** (via Node.js `tools/build_video.js`) to build 5 slides and concat into a final video with background music ducked under voice
+6. Generates YouTube title + description via `tools/youtube_metadata.py` (Gambhirananda translation)
+7. Uploads to **YouTube** via `tools/upload_youtube.py` (OAuth2, Data API v3)
+8. Sends a **Telegram** notification with video link or failure details
+9. Advances state pointer via `tools/state.py advance`
 
-State is tracked in a JSON file (chapter + verse index). The Code Node increments it on each run to prevent duplicates.
+State is tracked in `data/state.json` (chapter + verse). On each run the state is advanced to prevent duplicates. Currently at **Ch.1 V.33**.
 
 ---
 
@@ -30,19 +32,22 @@ State is tracked in a JSON file (chapter + verse index). The Code Node increment
 | Component | Tool | Notes |
 |---|---|---|
 | Orchestration | N8N (self-hosted) | Docker or `npx n8n` |
-| Script generation | Claude API | `claude-sonnet-4-6` recommended |
-| Sanskrit TTS | ElevenLabs â€” Taksh | Voice ID: `qDuRKMlYmrm8trt5QyBn` |
-| Hindi TTS | ElevenLabs â€” Niraj | Voice ID: `zgqefOY5FPQ3bB7OZTVR` |
-| Video | FFmpeg (Node.js) | Devanagari requires Noto Sans Devanagari font |
-| Background images | Pexels API | Free tier, unlimited |
-| Background music | YouTube Audio Library | Ambient flute, royalty-free |
-| Shloka dataset | GitHub gita repo (katharothi) | 700 shlokas, all 18 chapters, JSON |
-| Upload | YouTube Data API v3 | OAuth2, ~1600 units/upload, 10k units/day limit |
+| Hindi summary generation | Gemini 2.5 Flash API | Replaced Claude API; cached in `audio/summaries.json` |
+| YouTube metadata | `tools/youtube_metadata.py` | Uses Gambhirananda translation from `data/translation.json` |
+| Sanskrit TTS | ElevenLabs Ñ Taksh | Voice ID: `qDuRKMlYmrm8trt5QyBn` |
+| Hindi TTS | ElevenLabs Ñ Niraj | Voice ID: `zgqefOY5FPQ3bB7OZTVR` |
+| Video | FFmpeg via Node.js `build_video.js` | Devanagari requires Noto Sans Devanagari font |
+| Background images | Local `images/krishna-pool/` | Pre-fetched from Pexels via `fetch_krishna_images.py` |
+| Background music | `audio-sample-flute/` | Ambient flute, royalty-free |
+| Shloka dataset | `data/gita.json` | 700 shlokas, all 18 chapters |
+| Translation dataset | `data/translation.json` | Gambhirananda translations used for YouTube descriptions |
+| Upload | `tools/upload_youtube.py` | OAuth2 token persisted in `data/youtube_token.json` |
+| State tracking | `tools/state.py` | Reads/advances chapter+verse pointer in `data/state.json` |
 | Alerts | Telegram Bot API | Success + failure notifications |
 
 ### ElevenLabs Voice Settings
 
-Both voices use model `eleven_multilingual_v2` â€” the **only** ElevenLabs model with proper Devanagari script support.
+Both voices use model `eleven_multilingual_v2` Ñ the **only** ElevenLabs model with proper Devanagari script support.
 
 | Voice | Stability | Style |
 |---|---|---|
@@ -51,30 +56,86 @@ Both voices use model `eleven_multilingual_v2` â€” the **only** ElevenLabs model
 
 ---
 
+## Tools Reference
+
+| File | Purpose | Key flags |
+|---|---|---|
+| `tools/run_phase1.py` | Phase 1 coordinator Ñ fetch shloka, generate audio, build videos | `--chapter`, `--verse`, `--batch N`, `--mock-audio`, `--force-audio`, `--image-only` |
+| `tools/state.py` | Read/advance the chapter+verse pointer | `read` / `advance` |
+| `tools/fetch_shloka.py` | Fetch shloka data from `data/gita.json` | Ñ |
+| `tools/generate_audio.py` | Generate Hindi summaries (Gemini) and TTS audio (ElevenLabs) | Summaries cached in `audio/summaries.json` |
+| `tools/build_video.js` | FFmpeg compositor Ñ builds 5-slide video (plain or image style) | `--style plain|image`, `--output` |
+| `tools/youtube_metadata.py` | Generate YouTube title + description from Gambhirananda translation | `--chapter`, `--verse` |
+| `tools/upload_youtube.py` | Upload video to YouTube via OAuth2 | `--auth` (one-time), `--video`, `--title`, `--description`, `--playlist-id` |
+| `tools/fetch_krishna_images.py` | Pre-fetch background images from Pexels into `images/krishna-pool/` | `--count N` |
+
+### run_phase1.py usage examples
+
+```bash
+# Single shloka (image style only Ñ faster)
+python tools/run_phase1.py --chapter 1 --verse 2 --image-only
+
+# Single shloka with mock audio (no ElevenLabs API calls)
+python tools/run_phase1.py --chapter 1 --verse 2 --mock-audio
+
+# Batch process first N shlokas
+python tools/run_phase1.py --batch 5
+
+# Force regenerate audio even if cached
+python tools/run_phase1.py --chapter 1 --verse 2 --force-audio
+```
+
+### upload_youtube.py usage examples
+
+```bash
+# One-time OAuth2 consent (run once, token saved to data/youtube_token.json)
+python tools/upload_youtube.py --auth
+
+# Upload a video
+python tools/upload_youtube.py \
+  --video .tmp/ch01_v002_image_v1.mp4 \
+  --title "Bhagavad Gita - Adhyay 1 Shloka 2" \
+  --description "Shloka: ..." \
+  --playlist-id PL_XXXX
+```
+
+### youtube_metadata.py usage example
+
+```bash
+python tools/youtube_metadata.py --chapter 1 --verse 2
+# Outputs JSON: {"title": "...", "description": "..."}
+```
+
+---
+
 ## Video Specification
 
-**Output format:** 1080Ã—1920 (9:16 vertical), H.264, AAC audio, under 60 seconds
+**Output format:** 1080*1920 (9:16 vertical), H.264, AAC audio, under 60 seconds
 
 **Slide structure:**
-1. Intro â€” Chapter + Shloka reference
-2. Sanskrit â€” Devanagari text (Noto Sans Devanagari, 48px, yellow) + Taksh voice
-3. Transliteration â€” Roman IAST script (white, italic, smaller)
-4. Hindi Meaning â€” Devanagari text (40px, white) + Niraj voice
-5. Outro â€” Channel branding + subscribe prompt
+1. Intro Ñ Chapter + Shloka reference
+2. Sanskrit Ñ Devanagari text (Noto Sans Devanagari, 48px, yellow) + Taksh voice
+3. Transliteration Ñ Roman IAST script (white, italic, smaller)
+4. Hindi Meaning Ñ Devanagari text (40px, white) + Niraj voice
+5. Outro Ñ Channel branding + subscribe prompt
+
+**Video styles:** Two variants are built per shloka Ñ `plain` (solid background) and `image` (Krishna pool image background). The `--image-only` flag skips `plain` for faster pipeline runs.
 
 **Audio layers:** Voice at 100%, flute background at 20% (ducked during voice), 1s silence padding before/after each segment.
 
 **Visual effects:** Ken Burns slow zoom (2%) on background, text fade-in per line.
 
+**Output location:** `.tmp/ch{chapter:02d}_v{verse:03d}_{style}_{ver}.mp4` (e.g., `.tmp/ch01_v002_image_v1.mp4`)
+
 ---
 
 ## Shloka Dataset
 
-Source: GitHub `gita` repo (katharothi) â€” 700 shlokas in JSON.
+Source: `data/gita.json` Ñ 700 shlokas in JSON.
 
-Fields used: `chapter`, `verse`, `sanskrit_text`, `hindi_translation`.
+Fields used: `chapter_number`, `verse_number`, `text` (Sanskrit), `transliteration`.
 
-Hindi summaries are **generated by Claude API** (not taken from the dataset directly) for conciseness and natural spoken flow.
+Hindi summaries are **generated by Gemini 2.5 Flash API** and cached in `audio/summaries.json`. YouTube descriptions use **Gambhirananda translations** from `data/translation.json`.
 
 ---
 
@@ -82,36 +143,45 @@ Hindi summaries are **generated by Claude API** (not taken from the dataset dire
 
 | Phase | Status | Key Work |
 |---|---|---|
-| 1 â€” Foundation | Planning | Shloka JSON dataset, ElevenLabs audio module, FFmpeg compositor |
-| 2 â€” Pipeline Assembly | Planning | N8N workflow, state tracking, YouTube upload integration |
-| 3 â€” Quality Upgrades | Planned | Ken Burns, text fade animations, audio ducking, thumbnails |
-| 4 â€” Full Automation | Planned | Daily cron, error handling, Telegram alerts, dry-run mode |
-| 5 â€” Voice Evolution | Future | XTTS v2 local voice clone to replace ElevenLabs Sanskrit |
-| 6 â€” Shorts Scale | Future | Long-form videos, playlist organisation |
+| 1 Ñ Foundation | ? Complete | Shloka dataset, ElevenLabs audio, FFmpeg compositor, Gemini summaries, image pool |
+| 2 Ñ Pipeline Assembly | ? Complete | N8N workflow, state tracking (`state.py`), YouTube upload (`upload_youtube.py`), metadata (`youtube_metadata.py`) |
+| 3 Ñ Quality Upgrades | Planned | Ken Burns, text fade animations, audio ducking, thumbnails |
+| 4 Ñ Full Automation | Planned | Daily cron, error handling, Telegram alerts, dry-run mode |
+| 5 Ñ Voice Evolution | Future | XTTS v2 local voice clone to replace ElevenLabs Sanskrit |
+| 6 Ñ Shorts Scale | Future | Long-form videos, playlist organisation |
 
-**Phase 1 build order:**
-1. Shloka JSON dataset setup
-2. ElevenLabs audio generation module
-3. FFmpeg slide compositor
-4. N8N install + configure
-5. N8N workflow wiring all nodes
-6. YouTube Data API + OAuth setup
-7. Dry-run: generate first 3 videos
-8. Telegram bot notifications
-9. Enable daily cron â†’ go live
+**Current progress:** Ch.1 V.33 (state.json pointer Ñ 32 shlokas processed so far)
+
+---
+
+## Environment Variables (.env)
+
+| Variable | Purpose |
+|---|---|
+| `ELEVENLABS_API_KEY` | ElevenLabs TTS |
+| `GEMINI_API_KEY` | Gemini 2.5 Flash for Hindi summaries |
+| `PEXELS_API_KEY` | Pexels background image fetching |
+| `YOUTUBE_CLIENT_ID` | YouTube OAuth2 client ID |
+| `YOUTUBE_CLIENT_SECRET` | YouTube OAuth2 client secret |
+| `YOUTUBE_PLAYLIST_ID` | Target playlist for uploads |
+| `TELEGRAM_BOT_TOKEN` | Telegram alert bot |
+| `TELEGRAM_CHAT_ID` | Telegram chat/channel target |
 
 ---
 
 ## Key Constraints
 
 - ElevenLabs free tier: ~25 videos/month (10k chars). Starter plan ($5/mo) needed for daily cadence (~30k chars/mo).
-- YouTube API: 10,000 units/day free; one upload costs ~1,600 units â†’ max ~6 uploads/day. Sufficient for 1/day.
-- Claude API: no free tier; estimated $0.50â€“1.00/month for summaries + metadata.
+- YouTube API: 10,000 units/day free; one upload costs ~1,600 units ? max ~6 uploads/day. Sufficient for 1/day.
+- Gemini API: Free tier available; estimated minimal cost for summaries at daily cadence.
 - All AI-generated content must include an AI disclosure in the YouTube description from day 1.
-- Background music must come from YouTube Audio Library only (royalty-free).
+- Background music must be royalty-free (YouTube Audio Library or local `audio-sample-flute/`).
+- OAuth2 token is persisted in `data/youtube_token.json` Ñ keep this file out of git (it is in `.gitignore`).
 
 ---
 
 ## Error Handling
 
 N8N error branches catch failures at every step. On failure: Telegram alert with step name + error detail. Failed videos are queued for manual review; pipeline continues the following day.
+
+`run_phase1.py` raises `RuntimeError` on `build_video.js` failure and prints the last 600 chars of stderr for fast diagnosis.

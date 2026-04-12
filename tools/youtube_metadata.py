@@ -45,7 +45,7 @@ def generate_metadata(chapter: int, verse: int) -> dict:
     sanskrit = _clean(gita[idx]["text"])
     meaning = _clean(gambh[idx]["description"])
 
-    title = f"Bhagavad Gita - Adhyay {chapter} Shloka {verse}"
+    title = f"Bhagavad Gita - Adhyay {chapter} Shloka {verse} #krishna #gita #sanskrit"
     description = (
         f"Shloka: {sanskrit}\n\nMeaning: {meaning}\n#BhagavadGita #GitaShlokas #Krishna #Adhyay{chapter}"
     )

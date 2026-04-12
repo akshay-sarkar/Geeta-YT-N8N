@@ -69,6 +69,23 @@ def call_gemini(prompt: str) -> str:
     )
     return response.text
 
+import time
+
+def _call_with_retry(fn, *args, max_wait_minutes=60, **kwargs):
+    """Retry a Gemini call every 5 minutes on 503 UNAVAILABLE."""
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            if '503' in str(e) or 'UNAVAILABLE' in str(e):
+                print(f"  ⚠️  503 UNAVAILABLE (attempt {attempt}). "
+                      f"Retrying in 5 minutes...", flush=True)
+                time.sleep(300)  # 5 minutes
+            else:
+                raise  # Non-503 errors fail immediately
+
 
 def generate_summaries(
     chapter: int,
@@ -116,7 +133,8 @@ def generate_summaries(
         Summary 2: <second summary in Hindi>
     """).strip()
 
-    raw = call_gemini(prompt)
+    # raw = call_gemini(prompt)
+    raw = _call_with_retry(call_gemini, prompt)
     s1, s2 = parse_summaries(raw)
 
     AUDIO_DIR.mkdir(exist_ok=True)
@@ -131,41 +149,49 @@ GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 
 
 def call_gemini_tts(text: str, voice_name: str, output_path: pathlib.Path) -> None:
-    """Call Gemini TTS API and write MP3 to output_path."""
+    """Call Gemini TTS API. Auto-retries fallback voices on FinishReason.OTHER."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise EnvironmentError("GEMINI_API_KEY is not set in environment or .env")
     client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model=GEMINI_TTS_MODEL,
-        contents=text,
-        config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
-                )
-            ),
-        ),
-    )
-    candidate = response.candidates[0]
-    if str(candidate.finish_reason) == "FinishReason.OTHER":
-        raise RuntimeError(
-            f"Gemini TTS returned FinishReason.OTHER for voice {voice_name!r} — "
-            "voice may not support this script/language"
-        )
-    part = candidate.content.parts[0]
-    if not hasattr(part, "inline_data") or not part.inline_data:
-        raise RuntimeError(f"Gemini TTS returned no audio data for voice {voice_name!r}")
-    pcm = part.inline_data.data
-    proc = subprocess.run(
-        ["ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", "pipe:0", str(output_path)],
-        input=pcm,
-        capture_output=True,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg PCM→MP3 conversion failed: {proc.stderr.decode()}")
 
+    # Build trial order: primary first, then fallbacks (deduped)
+    pool = VOICE_SANSKRIT_FALLBACKS if voice_name in VOICE_SANSKRIT_FALLBACKS else VOICE_HINDI_FALLBACKS
+    voices_to_try = [voice_name] + [v for v in pool if v != voice_name]
+
+    last_err = None
+    for trial_voice in voices_to_try:
+        response = client.models.generate_content(
+            model=GEMINI_TTS_MODEL,
+            contents=text,
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=trial_voice)
+                    )
+                ),
+            ),
+        )
+        candidate = response.candidates[0]
+        if str(candidate.finish_reason) == "FinishReason.OTHER":
+            print(f"  ⚠️  Voice {trial_voice!r} FinishReason.OTHER — trying next fallback", flush=True)
+            last_err = RuntimeError(f"FinishReason.OTHER for {trial_voice!r}")
+            continue
+        part = candidate.content.parts[0]
+        if not hasattr(part, "inline_data") or not part.inline_data:
+            raise RuntimeError(f"No audio data returned for voice {trial_voice!r}")
+        proc = subprocess.run(
+            ["/opt/homebrew/bin/ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", "pipe:0", str(output_path)],
+            input=part.inline_data.data,
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg conversion failed: {proc.stderr.decode()}")
+        if trial_voice != voice_name:
+            print(f"  ✓ Used fallback voice {trial_voice!r} (primary {voice_name!r} unsupported)", flush=True)
+        return  # success
+    raise last_err or RuntimeError(f"All TTS voices failed for: {text[:40]!r}")
 
 def generate_speech(
     chapter: int,
@@ -204,14 +230,18 @@ def generate_speech(
         if not out.exists():
             raise RuntimeError(f"mock audio generation succeeded but output not found: {out}")
     else:
-        call_gemini_tts(text, voice_name, out)
+        _call_with_retry(call_gemini_tts, text, voice_name, out) # call_gemini_tts(text, voice_name, out)
 
     return out
 
 
 # Voice names (Gemini TTS)
-VOICE_SANSKRIT = "Callirrhoe"  # Sanskrit recitation
+VOICE_SANSKRIT = "Callirrhoe"  # Sanskrit recitation — primary voice
 VOICE_HINDI = "Leda"           # Hindi narration
+
+# Fallback voices in priority order when primary fails with FinishReason.OTHER
+VOICE_SANSKRIT_FALLBACKS = ["Callirrhoe", "Kore", "Fenrir", "Aoede"]
+VOICE_HINDI_FALLBACKS    = ["Leda", "Zephyr", "Orus"]
 
 
 def generate_audio_files(
